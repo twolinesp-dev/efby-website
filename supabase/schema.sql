@@ -1,12 +1,12 @@
 -- EFBY BAG CATALOGUE DATABASE SCHEMA (SUPABASE POSTGRESQL)
 -- Collection-First Bag Catalogue System with Strict Unique Article Numbers
 
--- 1. Enable UUID Extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- 1. Enable pgcrypto for random UUID generation
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- 2. Collections Table
 CREATE TABLE IF NOT EXISTS public.collections (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     slug TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     description TEXT,
@@ -20,11 +20,11 @@ CREATE TABLE IF NOT EXISTS public.collections (
 
 -- 3. Articles Table
 CREATE TABLE IF NOT EXISTS public.articles (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     article_number TEXT UNIQUE NOT NULL, -- Mandatory Unique Article Number
     model_name TEXT,
     slug TEXT UNIQUE NOT NULL,
-    primary_collection_id UUID REFERENCES public.collections(id) ON DELETE SET NULL,
+    primary_collection_id TEXT REFERENCES public.collections(id) ON DELETE SET NULL,
     short_description TEXT,
     full_description TEXT,
     main_image TEXT NOT NULL,
@@ -60,9 +60,9 @@ CREATE INDEX IF NOT EXISTS idx_articles_status ON public.articles(publication_st
 
 -- 4. Multi-Collection Memberships (Many-to-Many)
 CREATE TABLE IF NOT EXISTS public.article_collection_memberships (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    article_id UUID NOT NULL REFERENCES public.articles(id) ON DELETE CASCADE,
-    collection_id UUID NOT NULL REFERENCES public.collections(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    article_id TEXT NOT NULL REFERENCES public.articles(id) ON DELETE CASCADE,
+    collection_id TEXT NOT NULL REFERENCES public.collections(id) ON DELETE CASCADE,
     is_primary BOOLEAN DEFAULT false,
     display_order INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -71,8 +71,8 @@ CREATE TABLE IF NOT EXISTS public.article_collection_memberships (
 
 -- 5. Article Gallery Images
 CREATE TABLE IF NOT EXISTS public.article_images (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    article_id UUID NOT NULL REFERENCES public.articles(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    article_id TEXT NOT NULL REFERENCES public.articles(id) ON DELETE CASCADE,
     image_url TEXT NOT NULL,
     caption TEXT,
     display_order INTEGER DEFAULT 0,
@@ -83,20 +83,22 @@ CREATE TABLE IF NOT EXISTS public.article_images (
 
 -- 6. Article Colour Variations
 CREATE TABLE IF NOT EXISTS public.article_colours (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    article_id UUID NOT NULL REFERENCES public.articles(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    article_id TEXT NOT NULL REFERENCES public.articles(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     hex_code TEXT NOT NULL,
+    secondary_hex TEXT,
     display_order INTEGER DEFAULT 0,
     is_available BOOLEAN DEFAULT true,
+    image_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(article_id, name)
 );
 
 -- 7. Customer Enquiries
 CREATE TABLE IF NOT EXISTS public.enquiries (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    article_id UUID REFERENCES public.articles(id) ON DELETE SET NULL,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    article_id TEXT REFERENCES public.articles(id) ON DELETE SET NULL,
     article_number TEXT NOT NULL,
     model_name TEXT,
     customer_name TEXT NOT NULL,
@@ -119,7 +121,7 @@ CREATE TABLE IF NOT EXISTS public.site_settings (
 
 -- 9. Homepage Sections Configuration
 CREATE TABLE IF NOT EXISTS public.homepage_sections (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     section_key TEXT UNIQUE NOT NULL,
     title TEXT NOT NULL,
     subtitle TEXT,
@@ -138,59 +140,77 @@ ALTER TABLE public.enquiries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.site_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.homepage_sections ENABLE ROW LEVEL SECURITY;
 
--- Public Read Policies (Only published articles & non-hidden collections)
+-- Public Read Policies
+DROP POLICY IF EXISTS "Public collections are viewable by everyone" ON public.collections;
 CREATE POLICY "Public collections are viewable by everyone" 
 ON public.collections FOR SELECT USING (is_hidden = false);
 
+DROP POLICY IF EXISTS "Published articles are viewable by everyone" ON public.articles;
 CREATE POLICY "Published articles are viewable by everyone" 
 ON public.articles FOR SELECT USING (publication_status = 'published');
 
+DROP POLICY IF EXISTS "Published article memberships viewable by everyone" ON public.article_collection_memberships;
 CREATE POLICY "Published article memberships viewable by everyone" 
 ON public.article_collection_memberships FOR SELECT USING (
     EXISTS (SELECT 1 FROM public.articles WHERE articles.id = article_collection_memberships.article_id AND articles.publication_status = 'published')
 );
 
+DROP POLICY IF EXISTS "Published article images viewable by everyone" ON public.article_images;
 CREATE POLICY "Published article images viewable by everyone" 
 ON public.article_images FOR SELECT USING (
     EXISTS (SELECT 1 FROM public.articles WHERE articles.id = article_images.article_id AND articles.publication_status = 'published')
 );
 
+DROP POLICY IF EXISTS "Published article colours viewable by everyone" ON public.article_colours;
 CREATE POLICY "Published article colours viewable by everyone" 
 ON public.article_colours FOR SELECT USING (
     EXISTS (SELECT 1 FROM public.articles WHERE articles.id = article_colours.article_id AND articles.publication_status = 'published')
 );
 
+DROP POLICY IF EXISTS "Site settings viewable by everyone" ON public.site_settings;
 CREATE POLICY "Site settings viewable by everyone" 
 ON public.site_settings FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Homepage sections viewable by everyone" ON public.homepage_sections;
 CREATE POLICY "Homepage sections viewable by everyone" 
 ON public.homepage_sections FOR SELECT USING (is_enabled = true);
 
--- Public can submit enquiries (INSERT only), but CANNOT read enquiries
+-- Public can submit enquiries
+DROP POLICY IF EXISTS "Public can submit enquiries" ON public.enquiries;
 CREATE POLICY "Public can submit enquiries" 
 ON public.enquiries FOR INSERT WITH CHECK (true);
 
 -- Authenticated Admin Policies (Full access to all tables)
+DROP POLICY IF EXISTS "Admins have full access to collections" ON public.collections;
 CREATE POLICY "Admins have full access to collections" 
 ON public.collections FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Admins have full access to articles" ON public.articles;
 CREATE POLICY "Admins have full access to articles" 
 ON public.articles FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Admins have full access to article_collection_memberships" ON public.article_collection_memberships;
 CREATE POLICY "Admins have full access to article_collection_memberships" 
 ON public.article_collection_memberships FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Admins have full access to article_images" ON public.article_images;
 CREATE POLICY "Admins have full access to article_images" 
 ON public.article_images FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Admins have full access to article_colours" ON public.article_colours;
 CREATE POLICY "Admins have full access to article_colours" 
 ON public.article_colours FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Admins have full access to enquiries" ON public.enquiries;
 CREATE POLICY "Admins have full access to enquiries" 
 ON public.enquiries FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Admins have full access to site_settings" ON public.site_settings;
 CREATE POLICY "Admins have full access to site_settings" 
 ON public.site_settings FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Admins have full access to homepage_sections" ON public.homepage_sections;
 CREATE POLICY "Admins have full access to homepage_sections" 
 ON public.homepage_sections FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- Service role bypasses RLS automatically
