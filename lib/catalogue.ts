@@ -411,8 +411,12 @@ export function seedInitialData() {
   }
 }
 
-// Auto-seed on load
-seedInitialData();
+// Auto-seed on load safely
+try {
+  seedInitialData();
+} catch (e) {
+  console.warn('seedInitialData notice:', e);
+}
 
 // --- CATALOGUE API FUNCTIONS ---
 

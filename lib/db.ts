@@ -2,17 +2,42 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-// Database path
-const dbDir = path.join(process.cwd(), 'data');
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+// Database path resolution supporting local development & Vercel serverless functions
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL_ENV);
+const dbDir = isServerless ? '/tmp' : path.join(process.cwd(), 'data');
+
+try {
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Directory check/creation warning:', e);
 }
+
 const dbPath = path.join(dbDir, 'efby.db');
+
+// In serverless environments, copy seed database from repository to writable /tmp
+if (isServerless) {
+  try {
+    const seedDbPath = path.join(process.cwd(), 'data', 'efby.db');
+    if (fs.existsSync(seedDbPath) && !fs.existsSync(dbPath)) {
+      fs.copyFileSync(seedDbPath, dbPath);
+    }
+  } catch (e) {
+    console.warn('Failed to copy seed db to /tmp, will initialize freshly:', e);
+  }
+}
 
 // Initialize better-sqlite3
 const sqlite = new Database(dbPath);
-sqlite.pragma('journal_mode = WAL');
-sqlite.pragma('foreign_keys = ON');
+try {
+  sqlite.pragma('journal_mode = WAL');
+} catch (_) {
+  try { sqlite.pragma('journal_mode = DELETE'); } catch (_) {}
+}
+try {
+  sqlite.pragma('foreign_keys = ON');
+} catch (_) {}
 
 // Initialize Schema
 export function initDatabase() {
@@ -162,6 +187,10 @@ export function initDatabase() {
 }
 
 // Auto-run schema initialization
-initDatabase();
+try {
+  initDatabase();
+} catch (e) {
+  console.warn('initDatabase notice:', e);
+}
 
 export default sqlite;
